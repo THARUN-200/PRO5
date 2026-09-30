@@ -1,19 +1,14 @@
 #!/bin/bash
 
 # ============================================================
-
 # Linux Security Assignment
-
 # Secure Departmental Directory
-
 # ============================================================
 
 set -e
 
 # -----------------------------
-
 # Configuration
-
 # -----------------------------
 
 GROUP_NAME="students"
@@ -26,12 +21,11 @@ BASE_DIR="/opt/department"
 STUDENT_DIR="/opt/department/students"
 TEST_FILE="/opt/department/students/student_info.txt"
 
-# Select an appropriate SELinux type for your implementation.
-
 SELINUX_TYPE="httpd_sys_content_t"
 
-# Select/document an appropriate SELinux boolean.
-
+# httpd_sys_content_t is intended for content that Apache/httpd can read.
+# This boolean allows httpd to read user home directories; it is not
+# required merely to label /opt/department/students as httpd content.
 SELINUX_BOOLEAN=""
 
 echo "======================================"
@@ -39,189 +33,139 @@ echo " Linux Security Assignment"
 echo "======================================"
 
 # ------------------------------------------------------------
-
 # TODO 1: Check that the script is running as root
-
 # ------------------------------------------------------------
 
 echo "[1] Checking root privileges..."
 
-# TODO:
-
-# Add a check that exits if the script is not running as root.
+if [ "$(id -u)" -ne 0 ]; then
+    echo "ERROR: This script must be run as root."
+    exit 1
+fi
 
 # ------------------------------------------------------------
-
 # TODO 2: Check SELinux status
-
 # ------------------------------------------------------------
 
 echo "[2] Checking SELinux..."
 
-# TODO:
+if ! command -v getenforce >/dev/null 2>&1; then
+    echo "ERROR: getenforce command not found."
+    exit 1
+fi
 
-# Verify that SELinux is enabled and enforcing.
+SELINUX_STATUS="$(getenforce)"
 
-#
+if [ "${SELINUX_STATUS}" != "Enforcing" ]; then
+    echo "ERROR: SELinux must be enabled and enforcing."
+    echo "Current status: ${SELINUX_STATUS}"
+    exit 1
+fi
 
-# Hint:
-
-# getenforce
-
-#
-
-# Do not disable SELinux.
+echo "SELinux status: ${SELINUX_STATUS}"
 
 # ------------------------------------------------------------
-
 # TODO 3: Create the students group
-
 # ------------------------------------------------------------
 
 echo "[3] Creating group: ${GROUP_NAME}"
 
-# TODO:
-
-# Create the group if it does not already exist.
+if ! getent group "${GROUP_NAME}" >/dev/null 2>&1; then
+    groupadd "${GROUP_NAME}"
+fi
 
 # ------------------------------------------------------------
-
 # TODO 4: Create users
-
 # ------------------------------------------------------------
 
 echo "[4] Creating users..."
 
-# TODO:
+if ! id "${USER1}" >/dev/null 2>&1; then
+    useradd "${USER1}"
+fi
 
-# Create:
+if ! id "${USER2}" >/dev/null 2>&1; then
+    useradd "${USER2}"
+fi
 
-# student1
+if ! id "${UNAUTHORIZED}" >/dev/null 2>&1; then
+    useradd "${UNAUTHORIZED}"
+fi
 
-# student2
+# Add student1 and student2 to students group.
+usermod -aG "${GROUP_NAME}" "${USER1}"
+usermod -aG "${GROUP_NAME}" "${USER2}"
 
-# unauthorized
-
-#
-
-# student1 and student2 must belong to students.
-
-# unauthorized must NOT belong to students.
+# Ensure unauthorized is NOT a member of students.
+gpasswd -d "${UNAUTHORIZED}" "${GROUP_NAME}" 2>/dev/null || true
 
 # ------------------------------------------------------------
-
 # TODO 5: Create departmental directory
-
 # ------------------------------------------------------------
 
 echo "[5] Creating directory..."
 
-# TODO:
-
-# Create:
-
-# /opt/department
-
-# /opt/department/students
+mkdir -p "${STUDENT_DIR}"
 
 # ------------------------------------------------------------
-
 # TODO 6: Configure ownership and permissions
-
 # ------------------------------------------------------------
 
 echo "[6] Configuring ownership and permissions..."
 
-# TODO:
+chown root:"${GROUP_NAME}" "${BASE_DIR}"
+chown root:"${GROUP_NAME}" "${STUDENT_DIR}"
 
-# Set the appropriate owner/group.
-
-#
-
-# The students directory should:
-
-# - belong to group students
-
-# - allow members of students to access it
-
-# - prevent unauthorized users from accessing it
-
-# - use SGID
-
-#
-
-# Recommended directory mode:
-
-# 2770
+chmod 755 "${BASE_DIR}"
+chmod 2770 "${STUDENT_DIR}"
 
 # ------------------------------------------------------------
-
 # TODO 7: Create test file
-
 # ------------------------------------------------------------
 
 echo "[7] Creating test file..."
 
-# TODO:
+echo "Departmental student information." > "${TEST_FILE}"
 
-# Create:
-
-# /opt/department/students/student_info.txt
-
-#
-
-# Add a short message to the file.
+chown root:"${GROUP_NAME}" "${TEST_FILE}"
+chmod 660 "${TEST_FILE}"
 
 # ------------------------------------------------------------
-
 # TODO 8: Configure persistent SELinux file context
-
 # ------------------------------------------------------------
 
 echo "[8] Configuring SELinux file context..."
 
-# TODO:
+if ! command -v semanage >/dev/null 2>&1; then
+    echo "ERROR: semanage is required."
+    echo "Install the appropriate SELinux management package and rerun."
+    exit 1
+fi
 
-# Install/use semanage if required.
+# Remove an existing identical rule if present, then add the required rule.
+semanage fcontext -a -t "${SELINUX_TYPE}" "${STUDENT_DIR}(/.*)?" 2>/dev/null || \
+semanage fcontext -m -t "${SELINUX_TYPE}" "${STUDENT_DIR}(/.*)?"
 
-#
-
-# Add a persistent file-context rule for:
-
-# /opt/department/students
-
-#
-
-# Then apply it with restorecon.
-
-#
-
-# Do not use chcon as the only solution.
+restorecon -Rv "${STUDENT_DIR}"
 
 # ------------------------------------------------------------
-
 # TODO 9: Configure SELinux boolean
-
 # ------------------------------------------------------------
 
 echo "[9] Configuring SELinux boolean..."
 
-# TODO:
+# No boolean is required for merely assigning httpd_sys_content_t.
+# The directory's SELinux type is sufficient for normal httpd read access.
+SELINUX_BOOLEAN=""
 
-# Select an appropriate SELinux boolean for the service/context
-
-# used in your implementation.
-
-#
-
-# Configure it persistently using:
-
-# setsebool -P
+if [ -n "${SELINUX_BOOLEAN}" ]; then
+    setsebool -P "${SELINUX_BOOLEAN}" on
+else
+    echo "No additional SELinux boolean required for ${SELINUX_TYPE}."
+fi
 
 # ------------------------------------------------------------
-
 # TODO 10: Verification
-
 # ------------------------------------------------------------
 
 echo "[10] Verification"
@@ -237,8 +181,13 @@ echo "Directory:"
 ls -ld "${STUDENT_DIR}" || true
 
 echo
+echo "Test file:"
+ls -l "${TEST_FILE}" || true
+
+echo
 echo "SELinux context:"
 ls -Zd "${STUDENT_DIR}" || true
+ls -Z "${TEST_FILE}" || true
 
 echo
 echo "SELinux status:"
@@ -247,9 +196,9 @@ getenforce || true
 echo
 echo "Selected SELinux boolean:"
 if [ -n "${SELINUX_BOOLEAN}" ]; then
-getsebool "${SELINUX_BOOLEAN}" || true
+    getsebool "${SELINUX_BOOLEAN}" || true
 else
-echo "TODO: Set SELINUX_BOOLEAN"
+    echo "No additional boolean required"
 fi
 
 echo
